@@ -1,12 +1,10 @@
 from datetime import datetime, timedelta
 import os, uuid
-import asyncio
 from fastapi import APIRouter, Form, HTTPException, Depends, Request, Response
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Chat
 from datetime import datetime, timedelta
-from fastapi.responses import StreamingResponse
 from rag_engine import get_answer
 
 router = APIRouter(prefix="/chat")
@@ -82,7 +80,12 @@ async def chat_main(
         session_id = get_or_create_session(request, response)
 
         # Get AI response using RAG
-        ai_text = get_answer(text)
+        ai_text = get_answer(
+            question=text,
+            session_id=session_id,
+            db_session=db
+      )
+
 
 
         # Save to database

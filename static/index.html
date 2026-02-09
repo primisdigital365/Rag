@@ -254,7 +254,6 @@
       <span>Support AI Chatbot</span>
     </div>
     <div class="controls">
-      <!-- <button class="icon-btn" id="clear-btn" onclick="clearChat()" title="Clear Chat">🗑️</button> -->
       <button class="icon-btn active" id="voice-toggle" onclick="toggleVoice()" title="Toggle Voice Response">🔊</button>
     </div>
   </h2>
@@ -496,8 +495,13 @@ function showNotification(message, type = 'success') {
 // Load chat history
 async function loadHistory() {
   try {
-    const res = await fetch(`${API_BASE}/history`, { credentials: 'include' });
-    
+    const USER_ID = 'default_user';
+
+    const res = await fetch(
+       `${API_BASE}/history/${USER_ID}`,
+       { credentials: 'include' }
+    );
+
     if (!res.ok) {
       throw new Error(`Server returned ${res.status}`);
     }
@@ -532,7 +536,7 @@ async function clearChat() {
   chatBox.innerHTML = '<div class="info-message">Chat cleared. Start a new conversation! 👋</div>';
 }
 
-// Send message with streaming AND voice streaming
+// ✅ FIXED: Send message with proper streaming
 async function sendMessage() {
   const text = userInput.value.trim();
   if (!text) return;
@@ -555,7 +559,7 @@ async function sendMessage() {
     formData.append('text', text);
     formData.append('user_id', 'default_user');
 
-    const res = await fetch(`${API_BASE}/stream`, {
+    const res = await fetch(`${API_BASE}/`, {
       method: 'POST',
       body: formData,
       credentials: 'include'
@@ -565,44 +569,55 @@ async function sendMessage() {
 
     removeTyping();
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    // ✅ CRITICAL FIX: Don't call res.json() before reading the stream
+    // Check if response has streaming content
+    const contentType = res.headers.get('content-type');
+    
+    if (contentType && contentType.includes('text/event-stream')) {
+      // Handle streaming response
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
 
-    const aiDiv = addMessage('', 'ai');
-    let aiText = '';
-    let pendingSpeech = '';
+      const aiDiv = addMessage('', 'ai');
+      let aiText = '';
+      let pendingSpeech = '';
 
-    // ✅ KEY FIX: Process chunks as they arrive
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      
-      const chunk = decoder.decode(value, { stream: true });
-      aiText += chunk;
-      aiDiv.textContent = aiText;
-      chatBox.scrollTop = chatBox.scrollHeight;
-
-      // ✅ Add chunk to pending speech
-      pendingSpeech += chunk;
-
-      // ✅ Speak when we have complete sentences
-      const sentences = pendingSpeech.match(/[^.!?]+[.!?]+/g);
-      if (sentences && sentences.length > 0) {
-        // Speak complete sentences
-        sentences.forEach(sentence => {
-          queueSpeech(sentence);
-        });
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
         
-        // Keep remaining text
-        pendingSpeech = pendingSpeech.substring(
-          sentences.join('').length
-        );
-      }
-    }
+        const chunk = decoder.decode(value, { stream: true });
+        aiText += chunk;
+        aiDiv.textContent = aiText;
+        chatBox.scrollTop = chatBox.scrollHeight;
 
-    // ✅ Speak any remaining text
-    if (pendingSpeech.trim().length > 0) {
-      queueSpeech(pendingSpeech);
+        // Add chunk to pending speech
+        pendingSpeech += chunk;
+
+        // Speak when we have complete sentences
+        const sentences = pendingSpeech.match(/[^.!?]+[.!?]+/g);
+        if (sentences && sentences.length > 0) {
+          sentences.forEach(sentence => {
+            queueSpeech(sentence);
+          });
+          
+          // Keep remaining text
+          pendingSpeech = pendingSpeech.substring(
+            sentences.join('').length
+          );
+        }
+      }
+
+      // Speak any remaining text
+      if (pendingSpeech.trim().length > 0) {
+        queueSpeech(pendingSpeech);
+      }
+    } else {
+      // Handle regular JSON response (fallback)
+      const data = await res.json();
+      const aiMessage = data.message || data.answer || 'No response';
+      addMessage(aiMessage, 'ai');
+      queueSpeech(aiMessage);
     }
 
   } catch (err) {
